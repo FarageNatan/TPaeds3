@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.text.DecimalFormat;
 
 public class Filme{
-    static int tam = 0; // contador usado para gerar ids automaticos na criacao de novos filmes (Reinicia a cada execução do programa. Invalido se os registros já foram criados. Possivelmente incluir como metadado no cabeçalho do arquivo criado)
     int id;
     String nome;
     Data lancamento;
@@ -22,7 +21,6 @@ public class Filme{
     // Construtor principal: recebe todos os dados do filme e atribui um id automatico
     public Filme(String n, Data lan, float nota, String[]gen, String over, String[]el, String t, String stat,
         String[]idm, float orc){
-        id = tam++;
         this.nome = n;
         lancamento = lan;
         this.nota = nota;
@@ -68,11 +66,10 @@ public class Filme{
     public byte[] toByteArray() throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(baos);
-        String lancamentoS = lancamento.toString();
 
         dos.writeInt(id);
         dos.writeUTF(nome);
-        dos.writeUTF(lancamentoS);
+        dos.writeUTF(lancamento.toString());
         dos.writeFloat(nota);
         dos.writeUTF(String.join(", ", genero));
         dos.writeUTF(overview);
