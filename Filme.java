@@ -5,7 +5,6 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.text.DecimalFormat;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 public class Filme{
     static int tam = 0; // contador usado para gerar ids automaticos na criacao de novos filmes (Reinicia a cada execução do programa. Invalido se os registros já foram criados. Possivelmente incluir como metadado no cabeçalho do arquivo criado)
