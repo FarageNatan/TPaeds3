@@ -4,25 +4,23 @@ public class Data{
     int ano;
 
     public Data(String s){
-        String m = "";
-        m += s.charAt(0) + s.charAt(1);
-        String d = "";
-        d += s.charAt(3) + s.charAt(4);
-        String a = "";
-        a += s.charAt(6) + s.charAt(7) + s.charAt(8) + s.charAt(9);
+    int mes = Integer.parseInt(s.substring(0, 2));
+    int dia = Integer.parseInt(s.substring(3, 5));
+    int ano = Integer.parseInt(s.substring(6, 10));
 
-        int mes = Integer.parseInt(m);
-        int dia = Integer.parseInt(d);
-        int ano = Integer.parseInt(a);
-
-        this.mes = mes;
-        this.dia = dia;
-        this.ano = ano;
-    }
+    this.mes = mes;
+    this.dia = dia;
+    this.ano = ano;
+}
 
     public Data(int mes, int dia, int ano){
         this.mes = mes;
         this.dia = dia;
         this.ano = ano;
+    }
+
+    @Override
+    public String toString(){
+        return String.format("%02d/%02d/%04d", mes, dia, ano);
     }
 }
