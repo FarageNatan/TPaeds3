@@ -28,6 +28,9 @@ public class Main {
                 case 4:
                     opcaoDeletarRegistro();
                     break;
+                case 5:
+                    opcaoOrdenacaoExterna();
+                    break;
                 case 0:
                     System.out.println("Encerrando o programa...");
                     break;
@@ -44,7 +47,7 @@ public class Main {
 
     //  MENU
 
-
+    
     private static void exibirMenu() {
         System.out.println("==================================================");
         System.out.println("        SISTEMA DE GERENCIAMENTO DE FILMES         ");
@@ -53,6 +56,7 @@ public class Main {
         System.out.println(" 2 - Ler um registro (por ID)");
         System.out.println(" 3 - Atualizar um registro (por ID)");
         System.out.println(" 4 - Deletar um registro (por ID)");
+        System.out.println(" 5 - Ordenacao externa do arquivo (compacta + ordena por ID)");
         System.out.println(" 0 - Sair");
         System.out.println("--------------------------------------------------");
     }
@@ -160,6 +164,7 @@ public class Main {
 
     //  OPCAO 4 - DELETAR
 
+
     private static void opcaoDeletarRegistro() {
         System.out.println("--- Deletar registro ---");
         int id = lerInteiro("Digite o ID do filme a ser deletado: ");
@@ -190,6 +195,29 @@ public class Main {
         } catch (IOException e) {
             System.out.println("Erro ao acessar o arquivo binario: " + e.getMessage());
         }
+    }
+
+
+    //  OPCAO 5 - ORDENACAO EXTERNA
+
+
+    private static void opcaoOrdenacaoExterna() {
+        System.out.println("--- Ordenacao externa (intercalacao balanceada) ---");
+        System.out.println("Reescreve o arquivo ordenado por ID, descartando registros");
+        System.out.println("deletados (lapide) e o espaco desperdicado por atualizacoes.");
+        System.out.println("Otimizacoes: selecao por substituicao (blocos de tamanho");
+        System.out.println("variavel) + fila de prioridades na intercalacao.");
+
+        int numCaminhos = lerInteiro("Numero de caminhos (fitas por lado, minimo 2): ");
+        int maxRegistros = lerInteiro("Tamanho do heap em memoria - selecao por substituicao (minimo 1): ");
+
+        String confirma = lerString("O CRUD seguinte passara a operar no novo arquivo. Continuar? (S/N): ");
+        if (!confirma.equalsIgnoreCase("S")) {
+            System.out.println("Ordenacao cancelada.");
+            return;
+        }
+
+        gerenciador.ordenacaoExterna(numCaminhos, maxRegistros);
     }
 
 
