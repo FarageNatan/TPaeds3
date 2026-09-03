@@ -1,72 +1,242 @@
-import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.IOException;
+import java.util.Scanner;
 
 public class Main {
+
+    // Recursos compartilhados por todo o programa
+    private static final Scanner sc = new Scanner(System.in);
+    private static final GerenciadorArquivo gerenciador = new GerenciadorArquivo();
+
     public static void main(String[] args) {
-        GerenciadorArquivo gerenciador = new GerenciadorArquivo();
-        
-        // Chamada da carga - deixar comentado apos primeira execução
-        carregarBaseCSV("imdb_movies.csv", gerenciador);
+        int opcao;
+
+        do {
+            exibirMenu();
+            opcao = lerInteiro("Escolha uma opcao: ");
+            System.out.println();
+
+            switch (opcao) {
+                case 1:
+                    opcaoCarregarBase();
+                    break;
+                case 2:
+                    opcaoLerRegistro();
+                    break;
+                case 3:
+                    opcaoAtualizarRegistro();
+                    break;
+                case 4:
+                    opcaoDeletarRegistro();
+                    break;
+                case 0:
+                    System.out.println("Encerrando o programa...");
+                    break;
+                default:
+                    System.out.println("Opcao invalida! Tente novamente.");
+            }
+
+            System.out.println();
+        } while (opcao != 0);
+
+        sc.close();
     }
 
-    public static void carregarBaseCSV(String caminhoArquivo, GerenciadorArquivo gerenciador) {
-        System.out.println("Iniciando a carga de dados...");
-        int registrosCarregados = 0;
 
-        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
-            String linha = br.readLine();
-            
-            while ((linha = br.readLine()) != null) {
-                // Separa pelas vírgulas, ignorando as vírgulas dentro de aspas duplas
-                String[] colunas = linha.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+    //  MENU
 
-                try {
-                    String nome = limparAspas(colunas[0]);
-                    String dataS = limparAspas(colunas[1]); 
-                    float nota = colunas[2].isEmpty() ? 0 : Float.parseFloat(limparAspas(colunas[2]));
-                    String[] genero = limparAspas(colunas[3]).split(",");
-                    String overview = limparAspas(colunas[4]);
-                    String[] elenco = limparAspas(colunas[5]).split(",");
-                    String titulo = limparAspas(colunas[6]);
-                    String status = limparAspas(colunas[7]);
-                    String[] idiomas = limparAspas(colunas[8]).split(",");
-                    
-                    // Validações defensivas para Orçamento, Receita (revenue) e País (country)
-                    float orcamento = 0f;
-                    if(colunas.length > 9 && !colunas[9].isEmpty()) {
-                        try { orcamento = Float.parseFloat(limparAspas(colunas[9])); } catch (Exception ignore){}
-                    }
 
-                    float revenue = 0f;
-                    if(colunas.length > 10 && !colunas[10].isEmpty()) {
-                        try { revenue = Float.parseFloat(limparAspas(colunas[10])); } catch (Exception ignore){}
-                    }
+    private static void exibirMenu() {
+        System.out.println("==================================================");
+        System.out.println("        SISTEMA DE GERENCIAMENTO DE FILMES         ");
+        System.out.println("==================================================");
+        System.out.println(" 1 - Carregar base de dados (CSV -> arquivo binario)");
+        System.out.println(" 2 - Ler um registro (por ID)");
+        System.out.println(" 3 - Atualizar um registro (por ID)");
+        System.out.println(" 4 - Deletar um registro (por ID)");
+        System.out.println(" 0 - Sair");
+        System.out.println("--------------------------------------------------");
+    }
 
-                    String country = "";
-                    if(colunas.length > 11) {
-                        country = limparAspas(colunas[11]);
-                    }
 
-                    Data dataLancamento = new Data(dataS);
+    //  OPCAO 1 - CARGA DA BASE
 
-                    Filme filme = new Filme(nome, dataLancamento, nota, genero, overview, elenco, titulo, status, idiomas, orcamento, revenue, country);
-                    
-                    // Salva no Arquivo Binário chamando o Create do CRUD
-                    gerenciador.create(filme);
-                    registrosCarregados++;
 
-                } catch (Exception e) {
-                    System.out.println("Aviso: Linha mal formatada no CSV foi pulada. Conteúdo: " + linha);
-                }
+    private static void opcaoCarregarBase() {
+        System.out.println("--- Carga da base de dados ---");
+        String caminho = lerString("Caminho do CSV (ENTER para \"imdb_movies.csv\"): ");
+        if (caminho.isEmpty()) {
+            caminho = "imdb_movies.csv";
+        }
+
+        System.out.println("Atencao: a carga ANEXA os registros ao arquivo binario (rodar 2x duplica).");
+        String confirma = lerString("Continuar? (S/N): ");
+        if (!confirma.equalsIgnoreCase("S")) {
+            System.out.println("Carga cancelada.");
+            return;
+        }
+
+        gerenciador.carregarBaseCSV(caminho);
+    }
+
+
+    //  OPCAO 2 - LER
+
+
+    private static void opcaoLerRegistro() {
+        System.out.println("--- Ler registro ---");
+        int id = lerInteiro("Digite o ID do filme: ");
+
+        try {
+            Filme filme = gerenciador.read(id);
+            if (filme == null) {
+                System.out.println("Nenhum filme encontrado com o ID " + id + ".");
+            } else {
+                System.out.println();
+                System.out.println("--- Dados do filme ---");
+                System.out.println(filme);
             }
-            System.out.println("Carga concluída com sucesso! " + registrosCarregados + " filmes cadastrados.");
-
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (IOException e) {
+            System.out.println("Erro ao ler o arquivo binario: " + e.getMessage());
         }
     }
 
-    private static String limparAspas(String texto) {
-        return texto.replace("\"", "").trim();
+
+    //  OPCAO 3 - ATUALIZAR
+
+
+    private static void opcaoAtualizarRegistro() {
+        System.out.println("--- Atualizar registro ---");
+        int id = lerInteiro("Digite o ID do filme a ser atualizado: ");
+
+        try {
+            Filme atual = gerenciador.read(id);
+            if (atual == null) {
+                System.out.println("Nenhum filme encontrado com o ID " + id + ".");
+                return;
+            }
+
+            System.out.println();
+            System.out.println("--- Valores atuais ---");
+            System.out.println(atual);
+
+            System.out.println();
+            System.out.println("--- Digite os novos valores ---");
+            String nome      = lerString("Nome: ");
+
+            String dataS     = lerString("Data de lancamento (mesmo formato exibido em 'Valores atuais'): ");
+            if (dataS.isEmpty()) {
+                System.out.println("Data de lancamento obrigatoria. Atualizacao cancelada.");
+                return;
+            }
+
+            float  nota      = lerFloat("Nota: ");
+            String[] genero  = lerLista("Generos (separados por ';'): ");
+            String overview  = lerString("Sinopse (overview): ");
+            String[] elenco  = lerLista("Elenco (separado por ';'): ");
+            String titulo    = lerString("Titulo: ");
+            String status    = lerString("Status (ate 15 caracteres, o excedente e cortado): ");
+            String[] idiomas = lerLista("Idiomas originais (separados por ';'): ");
+            float  orcamento = lerFloat("Orcamento: ");
+            float  faturamento = lerFloat("Faturamento: ");
+            String pais      = lerString("Pais (codigo de 2 letras, ex: US - o excedente e cortado): ");
+
+            Filme novo = new Filme(nome, new Data(dataS), nota, genero, overview,
+                    elenco, titulo, status, idiomas, orcamento, faturamento, pais);
+            novo.id = id; // mantém o mesmo ID do registro original
+
+            boolean ok = gerenciador.update(novo);
+            if (ok) {
+                System.out.println("Filme atualizado com sucesso!");
+            } else {
+                System.out.println("Nao foi possivel atualizar o filme.");
+            }
+        } catch (IOException e) {
+            System.out.println("Erro ao acessar o arquivo binario: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("Dados invalidos, atualizacao abortada: " + e.getMessage());
+        }
+    }
+
+
+    //  OPCAO 4 - DELETAR
+
+    private static void opcaoDeletarRegistro() {
+        System.out.println("--- Deletar registro ---");
+        int id = lerInteiro("Digite o ID do filme a ser deletado: ");
+
+        try {
+            Filme filme = gerenciador.read(id);
+            if (filme == null) {
+                System.out.println("Nenhum filme encontrado com o ID " + id + ".");
+                return;
+            }
+
+            System.out.println();
+            System.out.println("Filme encontrado:");
+            System.out.println(filme);
+
+            String confirma = lerString("Confirma a exclusao (lapide)? (S/N): ");
+            if (!confirma.equalsIgnoreCase("S")) {
+                System.out.println("Exclusao cancelada.");
+                return;
+            }
+
+            boolean ok = gerenciador.delete(id);
+            if (ok) {
+                System.out.println("Filme deletado com sucesso (lapide marcada).");
+            } else {
+                System.out.println("Nao foi possivel deletar o filme.");
+            }
+        } catch (IOException e) {
+            System.out.println("Erro ao acessar o arquivo binario: " + e.getMessage());
+        }
+    }
+
+
+    //  LEITURA DE ENTRADA DO TERMINAL (apoio ao menu)
+
+
+    private static int lerInteiro(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            String entrada = sc.nextLine().trim();
+            try {
+                return Integer.parseInt(entrada);
+            } catch (NumberFormatException e) {
+                System.out.println("Valor invalido. Digite um numero inteiro.");
+            }
+        }
+    }
+
+    private static float lerFloat(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            String entrada = sc.nextLine().trim().replace(",", ".");
+            if (entrada.isEmpty()) {
+                return 0f;
+            }
+            try {
+                return Float.parseFloat(entrada);
+            } catch (NumberFormatException e) {
+                System.out.println("Valor invalido. Digite um numero (ex: 7.5).");
+            }
+        }
+    }
+
+    private static String lerString(String prompt) {
+        System.out.print(prompt);
+        return sc.nextLine().trim();
+    }
+
+    private static String[] lerLista(String prompt) {
+        String entrada = lerString(prompt);
+        if (entrada.isEmpty()) {
+            return new String[0];
+        }
+        String[] partes = entrada.split(";");
+        for (int i = 0; i < partes.length; i++) {
+            partes[i] = partes[i].trim();
+        }
+        return partes;
     }
 }
