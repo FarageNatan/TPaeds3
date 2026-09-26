@@ -10,15 +10,28 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 
 public class GerenciadorArquivo {
     private RandomAccessFile raf;
     private final String nomeArq = "filmes.db";
+
+    // Indices (TP2): Arvore B+ por id e duas listas invertidas (genero e pais)
+    static final int ORDEM_PADRAO = 8; // ordem usada quando a arvore ainda nao existe
+    private final String nomeArvore = "filmes_arvore.idx";
+    private final String nomeListaGenero = "lista_genero";
+    private final String nomeListaPais = "lista_pais";
+    private ArvoreBMais arvore;
+    private ListaInvertida listaGenero;
+    private ListaInvertida listaPais;
 
     // Criterio de ordenacao da ordenacao externa: por id crescente
     private static final Comparator<Filme> POR_ID = (a, b) -> Integer.compare(a.id, b.id);
@@ -31,6 +44,13 @@ public class GerenciadorArquivo {
             //Se for um arquivo novo, inicializa o cabeçalho (último ID) com 0
             if(!arquivoExiste){
                 raf.writeInt(0);
+            }
+
+            // Abre os indices; se ainda nao existem mas ha dados (ex: base do TP1), gera a partir do arquivo
+            boolean indicesExistem = new File(nomeArvore).exists();
+            abrirIndices(ORDEM_PADRAO);
+            if(!indicesExistem && raf.length() > 4){
+                reconstruirIndices(ORDEM_PADRAO);
             }
         }catch (IOException e){
             e.printStackTrace();
@@ -47,7 +67,7 @@ public class GerenciadorArquivo {
         System.out.println("Iniciando a carga de dados...");
         int registrosCarregados = 0;
 
-        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo, StandardCharsets.UTF_8))) {
             String linha = br.readLine(); //descarta o cabeçalho
 
             while ((linha = br.readLine()) != null) {
@@ -58,12 +78,12 @@ public class GerenciadorArquivo {
                     String nome = limparAspas(colunas[0]);
                     String dataS = limparAspas(colunas[1]);
                     float nota = colunas[2].isEmpty() ? 0 : Float.parseFloat(limparAspas(colunas[2]));
-                    String[] genero = limparAspas(colunas[3]).split(",");
+                    String[] genero = separarLista(colunas[3]);
                     String overview = limparAspas(colunas[4]);
-                    String[] elenco = limparAspas(colunas[5]).split(",");
+                    String[] elenco = separarLista(colunas[5]);
                     String titulo = limparAspas(colunas[6]);
                     String status = limparAspas(colunas[7]);
-                    String[] idiomas = limparAspas(colunas[8]).split(",");
+                    String[] idiomas = separarLista(colunas[8]);
 
                     // Validações defensivas para Orçamento, Receita (revenue) e País (country)
                     float orcamento = 0f;
@@ -106,8 +126,18 @@ public class GerenciadorArquivo {
         return texto.replace("\"", "").trim();
     }
 
-    //CREATE
-    //Escreve um novo registro no final do arquivo.
+    // Separa um campo multivalorado do CSV (ex: "Drama, Action") e limpa cada item
+    // (o CSV usa o espaco nao separavel   depois das virgulas)
+    private String[] separarLista(String campo) {
+        String[] partes = limparAspas(campo).split(",");
+        for (int i = 0; i < partes.length; i++) {
+            partes[i] = partes[i].replace(' ', ' ').trim();
+        }
+        return partes;
+    }
+
+    //CREATE  [indices: Arvore B+ e Listas invertidas]
+    //Escreve um novo registro no final do arquivo e o insere em todos os indices.
 
     public void create(Filme filme) throws IOException{
         raf.seek(0); //mover o ponteiro para início do arquivo (cabeçalho)
@@ -118,111 +148,220 @@ public class GerenciadorArquivo {
         raf.seek(0);
         raf.writeInt(ultimoId); //sobrescreve o valor do cabeçalho com o novo último id
 
-        raf.seek(raf.length());
+        long pos = raf.length(); // posicao do novo registro (vai para a Arvore B+)
+        raf.seek(pos);
         byte[] ba = filme.toByteArray(); //Serialização
 
         raf.writeBoolean(false);
         raf.writeInt(ba.length);
         raf.write(ba);
+
+        arvore.inserir(filme.id, pos);
+        inserirNasListas(filme);
     }
 
 
-    // READ
-    // Lê um registro através de seu ID realizando uma busca sequencial.
-    
+    // READ  [indice: Arvore B+]
+    // Busca a posicao do registro na Arvore B+ e le direto dessa posicao (sem busca sequencial).
+
     public Filme read(int idProc) throws IOException{
-        raf.seek(4); //pula o cabeçalho
-
-        while(raf.getFilePointer() < raf.length()){
-            boolean lapide = raf.readBoolean(); //Confere se eh valido
-            int tamanho = raf.readInt(); //Tamanho do registro
-
-            if(!lapide){
-                byte[] ba = new byte[tamanho];
-                raf.read(ba);
-
-                Filme filmetmp = new Filme();
-                filmetmp.fromByteArray(ba);
-
-                if(filmetmp.id == idProc){
-                    return filmetmp;
-                }
-            }else {
-                raf.skipBytes(tamanho); //registro inválido, pulamos
-            }
+        long pos = arvore.buscar(idProc);
+        if(pos == -1){
+            return null;
         }
-
-        return null;
+        return lerRegistro(pos);
     }
 
+    // Le o registro que comeca na posicao informada; devolve null se estiver com lapide
+    private Filme lerRegistro(long pos) throws IOException {
+        raf.seek(pos);
+        boolean lapide = raf.readBoolean();
+        int tamanho = raf.readInt();
+        if(lapide){
+            return null;
+        }
+
+        byte[] ba = new byte[tamanho];
+        raf.readFully(ba);
+        Filme filme = new Filme();
+        filme.fromByteArray(ba);
+        return filme;
+    }
+
+    // UPDATE  [indices: Arvore B+ para localizar; Arvore B+ e Listas invertidas atualizadas]
     public boolean update(Filme novoFilme) throws IOException {
-        raf.seek(4);
-
-        while(raf.getFilePointer() < raf.length()){
-            long pos = raf.getFilePointer();
-            boolean lapide = raf.readBoolean();
-            int tamAntigo = raf.readInt();
-
-            if(!lapide){
-                byte[] baAntigo = new byte[tamAntigo];
-                raf.read(baAntigo);
-
-                Filme filmetmp = new Filme();
-                filmetmp.fromByteArray(baAntigo);
-                if(filmetmp.id == novoFilme.id){
-                    byte[] baNovo = novoFilme.toByteArray();
-                    int tamanhoNovo = baNovo.length;
-
-                    if(tamanhoNovo <= tamAntigo){  //se o novo registro diminuir ou manter o tamanho do antigo, escreve na memsma posição
-                        raf.seek(pos + 5);
-                        raf.write(baNovo);
-                        return true;
-                    }else{ //novo registro aumentou de tamanho, devemos invalidar o antigo e escrever o novo ao final do arquivo
-                        raf.seek(pos);
-                        raf.writeBoolean(true);
-
-                        //processo do create, mas sem mexer no id
-                        raf.seek(raf.length());
-                        raf.writeBoolean(false);
-                        raf.writeInt(tamanhoNovo);
-                        raf.write(baNovo);
-                        return true;
-                    }
-                }
-            }else{
-                raf.skipBytes(tamAntigo);
-            }
+        long pos = arvore.buscar(novoFilme.id);
+        if(pos == -1){
+            return false;
         }
-        return false;
+
+        raf.seek(pos);
+        raf.readBoolean(); // lapide (a arvore so aponta para registros validos)
+        int tamAntigo = raf.readInt();
+        byte[] baAntigo = new byte[tamAntigo];
+        raf.readFully(baAntigo);
+        Filme antigo = new Filme();
+        antigo.fromByteArray(baAntigo);
+
+        byte[] baNovo = novoFilme.toByteArray();
+        int tamanhoNovo = baNovo.length;
+
+        if(tamanhoNovo <= tamAntigo){  //se o novo registro diminuir ou manter o tamanho do antigo, escreve na memsma posição
+            raf.seek(pos + 5);
+            raf.write(baNovo);
+        }else{ //novo registro aumentou de tamanho, devemos invalidar o antigo e escrever o novo ao final do arquivo
+            raf.seek(pos);
+            raf.writeBoolean(true);
+
+            //processo do create, mas sem mexer no id
+            long novaPos = raf.length();
+            raf.seek(novaPos);
+            raf.writeBoolean(false);
+            raf.writeInt(tamanhoNovo);
+            raf.write(baNovo);
+
+            arvore.atualizar(novoFilme.id, novaPos); // registro mudou de lugar
+        }
+
+        // listas invertidas: tira os termos antigos e coloca os novos
+        removerDasListas(antigo);
+        inserirNasListas(novoFilme);
+        return true;
     }
 
+    // DELETE  [indices: Arvore B+ para localizar; removido da Arvore B+ e das Listas invertidas]
     public boolean delete(int id) throws IOException{
-        raf.seek(4); // Pula o cabeçalho
-
-        while (raf.getFilePointer() < raf.length()) {
-            long posicaoRegistro = raf.getFilePointer(); // Guarda a posição onde a lápide deste registro se encontra
-            boolean lapide = raf.readBoolean();
-            int tamanho = raf.readInt();
-
-            if (!lapide) {
-                byte[] ba = new byte[tamanho];
-                raf.read(ba);
-
-                Filme filmeTemp = new Filme();
-                filmeTemp.fromByteArray(ba);
-
-                if (filmeTemp.id == id) {
-                    // Encontrou! Agora voltamos na posição guardada e marcamos a lápide
-                    raf.seek(posicaoRegistro);
-                    raf.writeBoolean(true); // True = excluído (lápide ativada)
-                    return true;
-                }
-            } else {
-                // Pula o tamanho do vetor de bytes para avançar ao próximo
-                raf.skipBytes(tamanho);
-            }
-        }
+        long pos = arvore.buscar(id);
+        if(pos == -1){
             return false;
+        }
+
+        Filme filme = lerRegistro(pos);
+        raf.seek(pos);
+        raf.writeBoolean(true); // True = excluído (lápide ativada)
+
+        arvore.remover(id);
+        if(filme != null){
+            removerDasListas(filme);
+        }
+        return true;
+    }
+
+
+    //  INDICES (TP2)
+
+    // Busca pelas listas invertidas. Com genero e pais informados, faz a
+    // INTERSECAO das duas listas (filmes que atendem aos dois termos).
+    // Campo vazio = nao filtra por ele. Devolve os ids em ordem crescente.
+    public List<Integer> buscarPorListas(String genero, String pais) throws IOException {
+        boolean usaGenero = !genero.trim().isEmpty();
+        boolean usaPais = !pais.trim().isEmpty();
+
+        List<Integer> resultado = new ArrayList<>();
+        if(usaGenero && usaPais){
+            resultado.addAll(listaGenero.buscar(genero));
+            resultado.retainAll(new HashSet<>(listaPais.buscar(pais)));
+        }else if(usaGenero){
+            resultado.addAll(listaGenero.buscar(genero));
+        }else if(usaPais){
+            resultado.addAll(listaPais.buscar(pais));
+        }
+
+        Collections.sort(resultado);
+        return resultado;
+    }
+
+    public Set<String> termosGenero() {
+        return listaGenero.termos();
+    }
+
+    public Set<String> termosPais() {
+        return listaPais.termos();
+    }
+
+    public int ordemArvore() {
+        return arvore.getOrdem();
+    }
+
+    // Coloca o id do filme na lista de cada um dos seus generos e na lista do seu pais
+    private void inserirNasListas(Filme filme) throws IOException {
+        for(String g : filme.genero){
+            listaGenero.inserir(g, filme.id);
+        }
+        listaPais.inserir(filme.pais, filme.id);
+    }
+
+    // Tira o id do filme das listas dos seus generos e do seu pais
+    private void removerDasListas(Filme filme) throws IOException {
+        for(String g : filme.genero){
+            listaGenero.remover(g, filme.id);
+        }
+        listaPais.remover(filme.pais, filme.id);
+    }
+
+    // Abre (ou cria) os arquivos de indice
+    private void abrirIndices(int ordem) throws IOException {
+        arvore = new ArvoreBMais(nomeArvore, ordem);
+        listaGenero = new ListaInvertida(nomeListaGenero);
+        listaPais = new ListaInvertida(nomeListaPais);
+    }
+
+    private void fecharIndices() throws IOException {
+        if(arvore != null) arvore.fechar();
+        if(listaGenero != null) listaGenero.fechar();
+        if(listaPais != null) listaPais.fechar();
+    }
+
+    // Apaga todos os indices e os gera de novo lendo o arquivo de dados
+    // sequencialmente (usado apos a ordenacao externa, que muda as posicoes,
+    // e para trocar a ordem da Arvore B+)
+    public void reconstruirIndices(int ordem) {
+        if(ordem < 3){
+            System.out.println("A ordem da arvore deve ser no minimo 3.");
+            return;
+        }
+
+        try {
+            fecharIndices();
+            new File(nomeArvore).delete();
+            new File(nomeListaGenero + ".dic").delete();
+            new File(nomeListaGenero + ".blc").delete();
+            new File(nomeListaPais + ".dic").delete();
+            new File(nomeListaPais + ".blc").delete();
+            abrirIndices(ordem);
+
+            int total = 0;
+            raf.seek(4); // pula o cabecalho
+            while(raf.getFilePointer() < raf.length()){
+                long pos = raf.getFilePointer();
+                boolean lapide = raf.readBoolean();
+                int tamanho = raf.readInt();
+                byte[] ba = new byte[tamanho];
+                raf.readFully(ba);
+
+                if(!lapide){
+                    Filme filme = new Filme();
+                    filme.fromByteArray(ba);
+                    arvore.inserir(filme.id, pos);
+                    inserirNasListas(filme);
+                    total++;
+                }
+            }
+            System.out.println("Indices gerados: " + total + " registro(s) na Arvore B+ (ordem " + ordem
+                    + ") e nas listas invertidas de genero e pais.");
+        } catch (IOException e) {
+            System.out.println("Erro ao reconstruir os indices: " + e.getMessage());
+        }
+    }
+
+    // Fecha o arquivo de dados e os indices (chamado ao sair do programa)
+    public void fechar() {
+        try {
+            raf.close();
+            fecharIndices();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
 
@@ -475,6 +614,9 @@ public class GerenciadorArquivo {
 
             System.out.println("Ordenacao externa concluida! " + qtdFinal
                     + " registro(s) ordenado(s) por ID em " + passada + " passada(s) de intercalacao.");
+
+            // as posicoes dos registros mudaram: os indices precisam ser refeitos
+            reconstruirIndices(arvore.getOrdem());
 
         } catch (IOException e) {
             System.out.println("Erro na ordenacao externa: " + e.getMessage());

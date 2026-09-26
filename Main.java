@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.util.List;
 import java.util.Scanner;
 
 public class Main {
@@ -20,16 +21,25 @@ public class Main {
                     opcaoCarregarBase();
                     break;
                 case 2:
-                    opcaoLerRegistro();
+                    opcaoCriarRegistro();
                     break;
                 case 3:
-                    opcaoAtualizarRegistro();
+                    opcaoLerRegistro();
                     break;
                 case 4:
-                    opcaoDeletarRegistro();
+                    opcaoBuscarPorListas();
                     break;
                 case 5:
+                    opcaoAtualizarRegistro();
+                    break;
+                case 6:
+                    opcaoDeletarRegistro();
+                    break;
+                case 7:
                     opcaoOrdenacaoExterna();
+                    break;
+                case 8:
+                    opcaoReconstruirIndices();
                     break;
                 case 0:
                     System.out.println("Encerrando o programa...");
@@ -41,22 +51,26 @@ public class Main {
             System.out.println();
         } while (opcao != 0);
 
+        gerenciador.fechar();
         sc.close();
     }
 
 
     //  MENU
 
-    
+
     private static void exibirMenu() {
         System.out.println("==================================================");
         System.out.println("        SISTEMA DE GERENCIAMENTO DE FILMES         ");
         System.out.println("==================================================");
         System.out.println(" 1 - Carregar base de dados (CSV -> arquivo binario)");
-        System.out.println(" 2 - Ler um registro (por ID)");
-        System.out.println(" 3 - Atualizar um registro (por ID)");
-        System.out.println(" 4 - Deletar um registro (por ID)");
-        System.out.println(" 5 - Ordenacao externa do arquivo (compacta + ordena por ID)");
+        System.out.println(" 2 - Criar um registro        [Arvore B+ e Listas invertidas]");
+        System.out.println(" 3 - Ler um registro por ID   [Arvore B+]");
+        System.out.println(" 4 - Buscar por genero e/ou pais [Listas invertidas]");
+        System.out.println(" 5 - Atualizar um registro    [Arvore B+ e Listas invertidas]");
+        System.out.println(" 6 - Deletar um registro      [Arvore B+ e Listas invertidas]");
+        System.out.println(" 7 - Ordenacao externa do arquivo (compacta + ordena por ID)");
+        System.out.println(" 8 - Reconstruir indices (definir ordem da Arvore B+)");
         System.out.println(" 0 - Sair");
         System.out.println("--------------------------------------------------");
     }
@@ -83,11 +97,32 @@ public class Main {
     }
 
 
-    //  OPCAO 2 - LER
+    //  OPCAO 2 - CRIAR
+
+
+    private static void opcaoCriarRegistro() {
+        System.out.println("--- Criar registro [indices: Arvore B+ e Listas invertidas] ---");
+
+        try {
+            Filme novo = lerDadosFilme();
+            if (novo == null) {
+                return;
+            }
+            gerenciador.create(novo);
+            System.out.println("Filme criado com sucesso! ID gerado: " + novo.id);
+        } catch (IOException e) {
+            System.out.println("Erro ao acessar o arquivo binario: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("Dados invalidos, criacao abortada: " + e.getMessage());
+        }
+    }
+
+
+    //  OPCAO 3 - LER
 
 
     private static void opcaoLerRegistro() {
-        System.out.println("--- Ler registro ---");
+        System.out.println("--- Ler registro [indice: Arvore B+] ---");
         int id = lerInteiro("Digite o ID do filme: ");
 
         try {
@@ -105,11 +140,50 @@ public class Main {
     }
 
 
-    //  OPCAO 3 - ATUALIZAR
+    //  OPCAO 4 - BUSCA PELAS LISTAS INVERTIDAS
+
+
+    private static void opcaoBuscarPorListas() {
+        System.out.println("--- Buscar por genero e/ou pais [indices: Listas invertidas] ---");
+        System.out.println("Generos cadastrados: " + String.join(", ", gerenciador.termosGenero()));
+        System.out.println("Paises cadastrados: " + String.join(", ", gerenciador.termosPais()));
+        System.out.println("Preencha um ou os dois campos (os dois = filmes que atendem aos DOIS).");
+
+        String genero = lerString("Genero (ENTER para ignorar): ");
+        String pais = lerString("Pais (ENTER para ignorar): ");
+        if (genero.isEmpty() && pais.isEmpty()) {
+            System.out.println("Nenhum criterio informado. Busca cancelada.");
+            return;
+        }
+
+        final int LIMITE = 50; // evita imprimir milhares de linhas no terminal
+        try {
+            List<Integer> ids = gerenciador.buscarPorListas(genero, pais);
+            System.out.println();
+            System.out.println(ids.size() + " filme(s) encontrado(s).");
+
+            // cada id vindo da lista invertida e lido pela Arvore B+
+            for (int i = 0; i < ids.size() && i < LIMITE; i++) {
+                Filme f = gerenciador.read(ids.get(i));
+                if (f != null) {
+                    System.out.println("ID " + f.id + " | " + f.nome + " | " + f.lancamento
+                            + " | " + String.join(", ", f.genero) + " | " + f.pais);
+                }
+            }
+            if (ids.size() > LIMITE) {
+                System.out.println("... e mais " + (ids.size() - LIMITE) + " filme(s).");
+            }
+        } catch (IOException e) {
+            System.out.println("Erro ao acessar os indices: " + e.getMessage());
+        }
+    }
+
+
+    //  OPCAO 5 - ATUALIZAR
 
 
     private static void opcaoAtualizarRegistro() {
-        System.out.println("--- Atualizar registro ---");
+        System.out.println("--- Atualizar registro [indices: Arvore B+ e Listas invertidas] ---");
         int id = lerInteiro("Digite o ID do filme a ser atualizado: ");
 
         try {
@@ -125,27 +199,10 @@ public class Main {
 
             System.out.println();
             System.out.println("--- Digite os novos valores ---");
-            String nome      = lerString("Nome: ");
-
-            String dataS     = lerString("Data de lancamento (mesmo formato exibido em 'Valores atuais'): ");
-            if (dataS.isEmpty()) {
-                System.out.println("Data de lancamento obrigatoria. Atualizacao cancelada.");
+            Filme novo = lerDadosFilme();
+            if (novo == null) {
                 return;
             }
-
-            float  nota      = lerFloat("Nota: ");
-            String[] genero  = lerLista("Generos (separados por ';'): ");
-            String overview  = lerString("Sinopse (overview): ");
-            String[] elenco  = lerLista("Elenco (separado por ';'): ");
-            String titulo    = lerString("Titulo: ");
-            String status    = lerString("Status (ate 15 caracteres, o excedente e cortado): ");
-            String[] idiomas = lerLista("Idiomas originais (separados por ';'): ");
-            float  orcamento = lerFloat("Orcamento: ");
-            float  faturamento = lerFloat("Faturamento: ");
-            String pais      = lerString("Pais (codigo de 2 letras, ex: US - o excedente e cortado): ");
-
-            Filme novo = new Filme(nome, new Data(dataS), nota, genero, overview,
-                    elenco, titulo, status, idiomas, orcamento, faturamento, pais);
             novo.id = id; // mantém o mesmo ID do registro original
 
             boolean ok = gerenciador.update(novo);
@@ -162,11 +219,11 @@ public class Main {
     }
 
 
-    //  OPCAO 4 - DELETAR
+    //  OPCAO 6 - DELETAR
 
 
     private static void opcaoDeletarRegistro() {
-        System.out.println("--- Deletar registro ---");
+        System.out.println("--- Deletar registro [indices: Arvore B+ e Listas invertidas] ---");
         int id = lerInteiro("Digite o ID do filme a ser deletado: ");
 
         try {
@@ -198,7 +255,7 @@ public class Main {
     }
 
 
-    //  OPCAO 5 - ORDENACAO EXTERNA
+    //  OPCAO 7 - ORDENACAO EXTERNA
 
 
     private static void opcaoOrdenacaoExterna() {
@@ -218,6 +275,48 @@ public class Main {
         }
 
         gerenciador.ordenacaoExterna(numCaminhos, maxRegistros);
+    }
+
+
+    //  OPCAO 8 - RECONSTRUIR INDICES
+
+
+    private static void opcaoReconstruirIndices() {
+        System.out.println("--- Reconstruir indices ---");
+        System.out.println("Apaga a Arvore B+ e as listas invertidas e as gera de novo a partir do arquivo de dados.");
+        System.out.println("Ordem atual da Arvore B+: " + gerenciador.ordemArvore());
+
+        int ordem = lerInteiro("Nova ordem da Arvore B+ (maximo de filhos por pagina, minimo 3): ");
+        gerenciador.reconstruirIndices(ordem);
+    }
+
+
+    //  LEITURA DOS CAMPOS DE UM FILME (usada no criar e no atualizar)
+    //  Devolve null se a data (obrigatoria) nao for informada.
+
+
+    private static Filme lerDadosFilme() {
+        String nome      = lerString("Nome: ");
+
+        String dataS     = lerString("Data de lancamento (MM/DD/AAAA): ");
+        if (dataS.isEmpty()) {
+            System.out.println("Data de lancamento obrigatoria. Operacao cancelada.");
+            return null;
+        }
+
+        float  nota      = lerFloat("Nota: ");
+        String[] genero  = lerLista("Generos (separados por ';'): ");
+        String overview  = lerString("Sinopse (overview): ");
+        String[] elenco  = lerLista("Elenco (separado por ';'): ");
+        String titulo    = lerString("Titulo: ");
+        String status    = lerString("Status (ate 15 caracteres, o excedente e cortado): ");
+        String[] idiomas = lerLista("Idiomas originais (separados por ';'): ");
+        float  orcamento = lerFloat("Orcamento: ");
+        float  faturamento = lerFloat("Faturamento: ");
+        String pais      = lerString("Pais (codigo de 2 letras, ex: US - o excedente e cortado): ");
+
+        return new Filme(nome, new Data(dataS), nota, genero, overview,
+                elenco, titulo, status, idiomas, orcamento, faturamento, pais);
     }
 
 
