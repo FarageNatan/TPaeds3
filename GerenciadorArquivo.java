@@ -24,14 +24,17 @@ public class GerenciadorArquivo {
     private RandomAccessFile raf;
     private final String nomeArq = "filmes.db";
 
-    // Indices (TP2): Arvore B+ por id e duas listas invertidas (genero e pais)
+    // Indices (TP2): Arvore B+ por id, duas listas invertidas (genero e pais)
+    // e Hashing Extensivel por id (busca alternativa O(1) para o mesmo campo)
     static final int ORDEM_PADRAO = 8; // ordem usada quando a arvore ainda nao existe
     private final String nomeArvore = "filmes_arvore.idx";
     private final String nomeListaGenero = "lista_genero";
     private final String nomeListaPais = "lista_pais";
+    private final String nomeHash = "filmes_hash"; // gera filmes_hash.dir e filmes_hash.bck
     private ArvoreBMais arvore;
     private ListaInvertida listaGenero;
     private ListaInvertida listaPais;
+    private HashExtensivel hashId;
 
     // Criterio de ordenacao da ordenacao externa: por id crescente
     private static final Comparator<Filme> POR_ID = (a, b) -> Integer.compare(a.id, b.id);
@@ -157,6 +160,7 @@ public class GerenciadorArquivo {
         raf.write(ba);
 
         arvore.inserir(filme.id, pos);
+        hashId.inserir(filme.id, pos);
         inserirNasListas(filme);
     }
 
@@ -187,6 +191,28 @@ public class GerenciadorArquivo {
         filme.fromByteArray(ba);
         return filme;
     }
+
+    // BUSCA ALTERNATIVA  [indice: Hashing Extensivel]
+    // Mesma busca por id do metodo read(), mas passando pelo indice de
+    // Hashing Extensivel em vez da Arvore B+ - serve para comparar as duas
+    // estruturas (devem sempre devolver a mesma posicao para o mesmo id).
+
+    public Filme buscarPorHash(int id) throws IOException {
+        long pos = hashId.buscar(id);
+        if (pos == -1) {
+            return null;
+        }
+        return lerRegistro(pos);
+    }
+
+    public int profundidadeHash() {
+        return hashId.getProfundidadeGlobal();
+    }
+
+    public int capacidadeBucketHash() {
+        return hashId.getCapacidadeBucket();
+    }
+
 
     // UPDATE  [indices: Arvore B+ para localizar; Arvore B+ e Listas invertidas atualizadas]
     public boolean update(Filme novoFilme) throws IOException {
@@ -221,6 +247,7 @@ public class GerenciadorArquivo {
             raf.write(baNovo);
 
             arvore.atualizar(novoFilme.id, novaPos); // registro mudou de lugar
+            hashId.atualizar(novoFilme.id, novaPos);
         }
 
         // listas invertidas: tira os termos antigos e coloca os novos
@@ -241,6 +268,7 @@ public class GerenciadorArquivo {
         raf.writeBoolean(true); // True = excluído (lápide ativada)
 
         arvore.remover(id);
+        hashId.remover(id);
         if(filme != null){
             removerDasListas(filme);
         }
@@ -304,12 +332,14 @@ public class GerenciadorArquivo {
         arvore = new ArvoreBMais(nomeArvore, ordem);
         listaGenero = new ListaInvertida(nomeListaGenero);
         listaPais = new ListaInvertida(nomeListaPais);
+        hashId = new HashExtensivel(nomeHash, HashExtensivel.CAPACIDADE_BUCKET_PADRAO);
     }
 
     private void fecharIndices() throws IOException {
         if(arvore != null) arvore.fechar();
         if(listaGenero != null) listaGenero.fechar();
         if(listaPais != null) listaPais.fechar();
+        if(hashId != null) hashId.fechar();
     }
 
     // Apaga todos os indices e os gera de novo lendo o arquivo de dados
@@ -328,6 +358,8 @@ public class GerenciadorArquivo {
             new File(nomeListaGenero + ".blc").delete();
             new File(nomeListaPais + ".dic").delete();
             new File(nomeListaPais + ".blc").delete();
+            new File(nomeHash + ".dir").delete();
+            new File(nomeHash + ".bck").delete();
             abrirIndices(ordem);
 
             int total = 0;
@@ -343,11 +375,13 @@ public class GerenciadorArquivo {
                     Filme filme = new Filme();
                     filme.fromByteArray(ba);
                     arvore.inserir(filme.id, pos);
+                    hashId.inserir(filme.id, pos);
                     inserirNasListas(filme);
                     total++;
                 }
             }
             System.out.println("Indices gerados: " + total + " registro(s) na Arvore B+ (ordem " + ordem
+                    + "), no Hashing Extensivel (profundidade " + hashId.getProfundidadeGlobal()
                     + ") e nas listas invertidas de genero e pais.");
         } catch (IOException e) {
             System.out.println("Erro ao reconstruir os indices: " + e.getMessage());

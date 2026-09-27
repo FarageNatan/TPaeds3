@@ -41,6 +41,9 @@ public class Main {
                 case 8:
                     opcaoReconstruirIndices();
                     break;
+                case 9:
+                    opcaoBuscarPorHash();
+                    break;
                 case 0:
                     System.out.println("Encerrando o programa...");
                     break;
@@ -71,6 +74,7 @@ public class Main {
         System.out.println(" 6 - Deletar um registro      [Arvore B+ e Listas invertidas]");
         System.out.println(" 7 - Ordenacao externa do arquivo (compacta + ordena por ID)");
         System.out.println(" 8 - Reconstruir indices (definir ordem da Arvore B+)");
+        System.out.println(" 9 - Buscar um registro por ID   [Hashing Extensivel]");
         System.out.println(" 0 - Sair");
         System.out.println("--------------------------------------------------");
     }
@@ -290,6 +294,28 @@ public class Main {
         gerenciador.reconstruirIndices(ordem);
     }
 
+
+    // OPCAO 9 - BUSCAR PELO HASHING EXTENSIVEL
+
+    private static void opcaoBuscarPorHash(){
+        System.out.println("--- Buscar registro [indice: Hashing Extensivel] ---");
+        int id = lerInteiro("Digite o ID do filme: ");
+
+        try{
+            Filme filme = gerenciador.buscarPorHash(id);
+            if(filme == null){
+                System.out.println("Nenhum filme encontrado com o ID " + id + ".");
+            } else {
+                System.out.println();
+                System.out.println("--- Dados do filme ---");
+                System.out.println(filme);
+            }
+            System.out.println();
+            System.out.println("(Profundidade global do diretorio: " + gerenciador.profundidadeHash() + " capacidade de cada bucket: " + gerenciador.capacidadeBucketHash() + " registros)");
+        } catch (IOException e){
+            System.out.println("Erro ao acessar o indice de Hashing: " + e.getMessage());
+        }
+    }
 
     //  LEITURA DOS CAMPOS DE UM FILME (usada no criar e no atualizar)
     //  Devolve null se a data (obrigatoria) nao for informada.
