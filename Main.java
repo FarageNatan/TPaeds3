@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
@@ -44,6 +45,15 @@ public class Main {
                 case 9:
                     opcaoBuscarPorHash();
                     break;
+                case 10:
+                    opcaoComprimir();
+                    break;
+                case 11:
+                    opcaoDescomprimir();
+                    break;
+                case 12:
+                    opcaoCasamentoPadrao();
+                    break;
                 case 0:
                     System.out.println("Encerrando o programa...");
                     break;
@@ -75,6 +85,9 @@ public class Main {
         System.out.println(" 7 - Ordenacao externa do arquivo (compacta + ordena por ID)");
         System.out.println(" 8 - Reconstruir indices (definir ordem da Arvore B+)");
         System.out.println(" 9 - Buscar um registro por ID   [Hashing Extensivel]");
+        System.out.println("10 - Comprimir a base de dados   [Huffman e LZW]");
+        System.out.println("11 - Descomprimir uma versao     [Huffman e LZW]");
+        System.out.println("12 - Buscar um padrao no texto   [KMP e Boyer-Moore]");
         System.out.println(" 0 - Sair");
         System.out.println("--------------------------------------------------");
     }
@@ -316,6 +329,114 @@ public class Main {
             System.out.println("Erro ao acessar o indice de Hashing: " + e.getMessage());
         }
     }
+
+    //  OPCAO 10 - COMPRESSAO (Huffman e LZW)
+
+    private static void opcaoComprimir() {
+        System.out.println("--- Compressao da base de dados [Huffman e LZW] ---");
+        System.out.println("O arquivo de dados inteiro e comprimido pelos dois algoritmos.");
+        System.out.println("Os arquivos gerados seguem o nome: <arquivo><Algoritmo>Compressao<versao>");
+        gerenciador.comprimirBase();
+    }
+
+
+    //  OPCAO 11 - DESCOMPRESSAO
+
+    private static void opcaoDescomprimir() {
+        System.out.println("--- Descompressao [Huffman e LZW] ---");
+
+        List<Integer> versoes = gerenciador.versoesCompressao();
+        if (versoes.isEmpty()) {
+            System.out.println("Nenhuma versao de compressao encontrada. Use a opcao 10 primeiro.");
+            return;
+        }
+        System.out.println("Versoes disponiveis: " + versoes);
+        System.out.println("Atencao: o arquivo de dados atual sera SUBSTITUIDO pela versao descomprimida.");
+
+        int versao = lerInteiro("Versao a descomprimir: ");
+        String confirma = lerString("Continuar? (S/N): ");
+        if (!confirma.equalsIgnoreCase("S")) {
+            System.out.println("Descompressao cancelada.");
+            return;
+        }
+
+        gerenciador.descomprimirBase(versao);
+    }
+
+
+    //  OPCAO 12 - CASAMENTO DE PADRAO (KMP e Boyer-Moore)
+
+    private static void opcaoCasamentoPadrao() {
+        System.out.println("--- Casamento de padrao [KMP e Boyer-Moore] ---");
+        System.out.println("Campos disponiveis:");
+        for (int i = 0; i < GerenciadorArquivo.CAMPOS_BUSCA.length; i++) {
+            System.out.println("  " + (i + 1) + " - " + GerenciadorArquivo.CAMPOS_BUSCA[i]);
+        }
+        int campo = lerInteiro("Campo: ") - 1;
+        if (campo < 0 || campo >= GerenciadorArquivo.CAMPOS_BUSCA.length) {
+            System.out.println("Campo invalido.");
+            return;
+        }
+
+        String padrao = lerString("Padrao a procurar (ignora maiusculas e acentos): ");
+        if (padrao.isEmpty()) {
+            System.out.println("Padrao vazio. Busca cancelada.");
+            return;
+        }
+
+        System.out.println("Algoritmo: 1 - KMP | 2 - Boyer-Moore | 3 - Os dois (compara)");
+        int alg = lerInteiro("Algoritmo: ");
+
+        // o padrao passa pela mesma normalizacao dos textos (minusculas, sem acentos)
+        String p = GerenciadorArquivo.normalizar(padrao);
+        List<BuscadorPadrao> buscadores = new ArrayList<>();
+        if (alg == 1 || alg == 3) buscadores.add(new KMP(p));
+        if (alg == 2 || alg == 3) buscadores.add(new BoyerMoore(p));
+        if (buscadores.isEmpty()) {
+            System.out.println("Algoritmo invalido.");
+            return;
+        }
+
+        try {
+            GerenciadorArquivo.ResultadoBusca r = gerenciador.buscarPadrao(campo, buscadores);
+
+            System.out.println();
+            System.out.println(r.acertos.size() + " filme(s) com o padrao \"" + padrao + "\" ("
+                    + r.totalOcorrencias + " ocorrencia(s) no total), em " + r.registrosVarridos
+                    + " registro(s) varridos.");
+
+            final int LIMITE = 20; // evita imprimir milhares de linhas no terminal
+            for (int i = 0; i < r.acertos.size() && i < LIMITE; i++) {
+                GerenciadorArquivo.Acerto a = r.acertos.get(i);
+                System.out.println("ID " + a.filme.id + " | " + a.filme.nome + " | " + a.ocorrencias
+                        + " ocorrencia(s) | " + a.trecho);
+            }
+            if (r.acertos.size() > LIMITE) {
+                System.out.println("... e mais " + (r.acertos.size() - LIMITE) + " filme(s).");
+            }
+
+            System.out.println();
+            System.out.println("Desempenho (so a busca; a leitura do arquivo nao entra na conta):");
+            for (int a = 0; a < buscadores.size(); a++) {
+                System.out.printf("  %-12s %,d comparacoes de caracteres | %.2f ms%n",
+                        buscadores.get(a).nome(), r.comparacoes[a], r.nanos[a] / 1_000_000.0);
+            }
+
+            if (buscadores.size() == 2) {
+                if (r.ocorrenciasAlg[0] != r.ocorrenciasAlg[1]) {
+                    System.out.println("ATENCAO: os algoritmos acharam quantidades diferentes de ocorrencias!");
+                } else {
+                    int menosComp = (r.comparacoes[0] <= r.comparacoes[1]) ? 0 : 1;
+                    int maisRapido = (r.nanos[0] <= r.nanos[1]) ? 0 : 1;
+                    System.out.println("Menos comparacoes: " + buscadores.get(menosComp).nome()
+                            + " | Mais rapido: " + buscadores.get(maisRapido).nome());
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Erro ao ler o arquivo de dados: " + e.getMessage());
+        }
+    }
+
 
     //  LEITURA DOS CAMPOS DE UM FILME (usada no criar e no atualizar)
     //  Devolve null se a data (obrigatoria) nao for informada.

@@ -11,11 +11,13 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -722,5 +724,295 @@ public class GerenciadorArquivo {
                 ignore.printStackTrace();
             }
         }
+    }
+
+
+    //  COMPRESSAO DE DADOS (Etapa 3) - Huffman e LZW
+    //  Os dois algoritmos comprimem o arquivo de dados INTEIRO, byte a byte
+    //  (cabecalho com o ultimo id, lapides, indicadores de tamanho, strings,
+    //  floats...), e geram arquivos de nome:
+    //      <nomeArquivo><nomeAlgoritmo>Compressao<X>   ex.: filmesHuffmanCompressao1
+    //  em que X e a versao da compressao (a mesma para os dois algoritmos).
+
+    // Nome base do arquivo de dados, sem extensao ("filmes.db" -> "filmes")
+    private String nomeBase() {
+        int ponto = nomeArq.lastIndexOf('.');
+        return (ponto < 0) ? nomeArq : nomeArq.substring(0, ponto);
+    }
+
+    // Compacta o arquivo de dados com Huffman e com LZW, mede tamanho e tempo
+    // de cada um e mostra qual foi melhor. O arquivo de dados NAO e alterado.
+    public void comprimirBase() {
+        String[] algoritmos = {"Huffman", "LZW"};
+        int[] tamanhos = new int[2];
+        long[] tempos = new long[2];
+        long original = new File(nomeArq).length();
+        int versao = ArquivosUtil.proximaVersao(nomeBase());
+
+        if (original <= 4) {
+            System.out.println("A base esta vazia (carregue os dados antes de comprimir).");
+            return;
+        }
+
+        System.out.println("Comprimindo \"" + nomeArq + "\" (" + original + " bytes) - versao " + versao + "...");
+
+        try {
+            for (int i = 0; i < 2; i++) {
+                String saida = ArquivosUtil.nomeComprimido(nomeBase(), algoritmos[i], versao);
+
+                // o tempo medido inclui leitura do arquivo, compressao e gravacao
+                long ini = System.nanoTime();
+                if (i == 0) Huffman.comprimir(nomeArq, saida);
+                else        LZW.comprimir(nomeArq, saida);
+                tempos[i] = System.nanoTime() - ini;
+
+                tamanhos[i] = (int) new File(saida).length();
+            }
+        } catch (IOException e) {
+            System.out.println("Erro na compressao: " + e.getMessage());
+            return;
+        }
+
+        System.out.println();
+        System.out.println("Resultado da compressao (versao " + versao + "):");
+        for (int i = 0; i < 2; i++) {
+            // ganho = quanto o arquivo diminuiu em relacao ao original (negativo = perda)
+            double ganho = (1.0 - (double) tamanhos[i] / original) * 100.0;
+            System.out.printf("  %-8s -> %s | %d bytes | %s de %.2f%% | %.1f ms%n",
+                    algoritmos[i], ArquivosUtil.nomeComprimido(nomeBase(), algoritmos[i], versao),
+                    tamanhos[i], ganho >= 0 ? "ganho" : "PERDA", Math.abs(ganho), tempos[i] / 1_000_000.0);
+        }
+
+        System.out.println();
+        int melhorTam = (tamanhos[0] <= tamanhos[1]) ? 0 : 1;
+        int maisRapido = (tempos[0] <= tempos[1]) ? 0 : 1;
+        System.out.println("Melhor taxa de compressao: " + algoritmos[melhorTam]
+                + " (" + Math.abs(tamanhos[0] - tamanhos[1]) + " bytes a menos que o outro).");
+        System.out.println("Mais rapido: " + algoritmos[maisRapido]
+                + " (" + String.format("%.1f", Math.max(tempos[0], tempos[1]) / (double) Math.max(1, Math.min(tempos[0], tempos[1])))
+                + "x mais rapido).");
+        if (melhorTam == maisRapido) {
+            System.out.println("Conclusao: " + algoritmos[melhorTam] + " foi melhor em tamanho E em tempo nesta base.");
+        } else {
+            System.out.println("Conclusao: " + algoritmos[melhorTam] + " comprime mais, mas "
+                    + algoritmos[maisRapido] + " e mais rapido nesta base.");
+        }
+    }
+
+    // Lista as versoes de compressao encontradas no diretorio
+    public List<Integer> versoesCompressao() {
+        return ArquivosUtil.versoesExistentes(nomeBase());
+    }
+
+    // Descomprime a versao "versao" com os DOIS algoritmos (cada um a partir
+    // do seu proprio arquivo), compara os tempos e SUBSTITUI o arquivo de
+    // dados pelo resultado. Como o arquivo pode ter mudado desde a compressao
+    // e a posicao dos registros e o que os indices guardam, eles sao refeitos.
+    public void descomprimirBase(int versao) {
+        String[] algoritmos = {"Huffman", "LZW"};
+        String[] entrada = new String[2];
+        String[] temporario = new String[2];
+        boolean[] ok = new boolean[2];
+        long[] tempos = new long[2];
+
+        for (int i = 0; i < 2; i++) {
+            entrada[i] = ArquivosUtil.nomeComprimido(nomeBase(), algoritmos[i], versao);
+            temporario[i] = nomeBase() + "_desc" + algoritmos[i] + ".tmp";
+        }
+
+        boolean existe0 = new File(entrada[0]).exists();
+        boolean existe1 = new File(entrada[1]).exists();
+        if (!existe0 && !existe1) {
+            System.out.println("Nenhum arquivo da versao " + versao + " foi encontrado.");
+            return;
+        }
+
+        System.out.println("Descomprimindo a versao " + versao + "...");
+        System.out.println();
+
+        // 1) descomprime cada algoritmo para um arquivo temporario (o original ainda nao e tocado)
+        for (int i = 0; i < 2; i++) {
+            if (!new File(entrada[i]).exists()) {
+                System.out.println("  " + algoritmos[i] + ": arquivo " + entrada[i] + " nao encontrado - ignorado.");
+                continue;
+            }
+            try {
+                long ini = System.nanoTime();
+                if (i == 0) Huffman.descomprimir(entrada[i], temporario[i]);
+                else        LZW.descomprimir(entrada[i], temporario[i]);
+                tempos[i] = System.nanoTime() - ini;
+                ok[i] = true;
+                System.out.printf("  %-8s -> %d bytes em %.1f ms%n", algoritmos[i],
+                        new File(temporario[i]).length(), tempos[i] / 1_000_000.0);
+            } catch (IOException e) {
+                System.out.println("  " + algoritmos[i] + ": erro na descompressao - " + e.getMessage());
+            }
+        }
+
+        int escolhido = ok[0] ? 0 : (ok[1] ? 1 : -1);
+        if (escolhido == -1) {
+            System.out.println("Descompressao falhou; o arquivo de dados NAO foi alterado.");
+            apagarArquivos(temporario);
+            return;
+        }
+
+        // 2) se os dois funcionaram, compara tempos e confere se o resultado e identico
+        if (ok[0] && ok[1]) {
+            try {
+                if (!ArquivosUtil.iguais(temporario[0], temporario[1])) {
+                    System.out.println("ERRO: Huffman e LZW produziram arquivos diferentes. Arquivo de dados NAO alterado.");
+                    apagarArquivos(temporario);
+                    return;
+                }
+            } catch (IOException e) {
+                System.out.println("Erro ao comparar os resultados: " + e.getMessage());
+                apagarArquivos(temporario);
+                return;
+            }
+            int maisRapido = (tempos[0] <= tempos[1]) ? 0 : 1;
+            System.out.println();
+            System.out.println("Os dois algoritmos recuperaram exatamente o mesmo arquivo.");
+            System.out.println("Mais rapido na descompressao: " + algoritmos[maisRapido] + " ("
+                    + String.format("%.1f", Math.max(tempos[0], tempos[1]) / (double) Math.max(1, Math.min(tempos[0], tempos[1])))
+                    + "x mais rapido).");
+        }
+
+        // 3) substitui o arquivo de dados (via backup, para nao perder dados se algo falhar)
+        try {
+            raf.close();
+            File atual = new File(nomeArq);
+            File backup = new File(nomeBase() + "_bkp.db");
+            File novo = new File(temporario[escolhido]);
+            backup.delete();
+
+            if (!atual.renameTo(backup)) {
+                throw new IOException("nao foi possivel mover o arquivo atual para backup.");
+            }
+            if (!novo.renameTo(atual)) {
+                backup.renameTo(atual); // desfaz
+                throw new IOException("nao foi possivel ativar o arquivo descomprimido.");
+            }
+            backup.delete();
+            raf = new RandomAccessFile(nomeArq, "rw");
+            apagarArquivos(temporario);
+
+            System.out.println();
+            System.out.println("Arquivo de dados substituido pela versao " + versao + " descomprimida.");
+            reconstruirIndices(arvore.getOrdem()); // posicoes podem ter mudado: refaz os indices
+        } catch (IOException e) {
+            System.out.println("Erro ao substituir o arquivo de dados: " + e.getMessage());
+            garantirArquivoAberto();
+            apagarArquivos(temporario);
+        }
+    }
+
+    private void apagarArquivos(String[] nomes) {
+        for (String n : nomes) new File(n).delete();
+    }
+
+
+    //  CASAMENTO DE PADRAO (Etapa 3) - KMP e Boyer-Moore
+    //  Varre TODOS os registros validos do arquivo e procura o padrao no campo
+    //  escolhido. Os dois algoritmos rodam sobre exatamente os mesmos textos
+    //  e so o tempo gasto dentro de buscarTodos() e contado (a leitura do
+    //  arquivo fica de fora), para a comparacao ser justa.
+
+    // Campos disponiveis para a busca (indice = opcao do menu)
+    public static final String[] CAMPOS_BUSCA = {
+        "Nome", "Titulo", "Sinopse (overview)", "Elenco", "Generos", "Idiomas originais",
+        "TODOS os campos de texto"
+    };
+
+    // Um filme que contem o padrao
+    public static class Acerto {
+        public final Filme filme;
+        public final int ocorrencias; // quantas vezes o padrao aparece no campo
+        public final String trecho;   // pedaco do texto ao redor da 1a ocorrencia
+        Acerto(Filme filme, int ocorrencias, String trecho) {
+            this.filme = filme;
+            this.ocorrencias = ocorrencias;
+            this.trecho = trecho;
+        }
+    }
+
+    // Resultado da varredura: acertos + estatisticas de cada algoritmo
+    public static class ResultadoBusca {
+        public int registrosVarridos = 0;
+        public long totalOcorrencias = 0;
+        public final List<Acerto> acertos = new ArrayList<>();
+        public long[] nanos;           // tempo de cada algoritmo
+        public long[] comparacoes;     // comparacoes de caracteres de cada algoritmo
+        public long[] ocorrenciasAlg;  // ocorrencias achadas por cada algoritmo (devem ser iguais)
+    }
+
+    // Deixa o texto em minusculas e sem acentos, para a busca ignorar
+    // maiusculas/minusculas e acentuacao ("amelie" acha "Amélie")
+    public static String normalizar(String s) {
+        String nfd = Normalizer.normalize(s, Normalizer.Form.NFD);
+        return nfd.replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT);
+    }
+
+    // Monta o texto do filme que sera pesquisado, conforme o campo escolhido
+    private String textoDoCampo(Filme f, int campo) {
+        switch (campo) {
+            case 0: return f.nome;
+            case 1: return f.titulo;
+            case 2: return f.overview;
+            case 3: return String.join(", ", f.elenco);
+            case 4: return String.join(", ", f.genero);
+            case 5: return String.join(", ", f.idiomaOr);
+            default:
+                // todos os campos de texto; o '\n' evita casar um padrao atravessando dois campos
+                return f.nome + "\n" + f.titulo + "\n" + f.overview + "\n" + String.join(", ", f.elenco)
+                        + "\n" + String.join(", ", f.genero) + "\n" + String.join(", ", f.idiomaOr)
+                        + "\n" + f.status + "\n" + f.pais;
+        }
+    }
+
+    // Procura "padrao" no campo informado (0..6, ver CAMPOS_BUSCA) usando os
+    // buscadores recebidos (ja criados com o padrao normalizado)
+    public ResultadoBusca buscarPadrao(int campo, List<BuscadorPadrao> buscadores) throws IOException {
+        int nAlg = buscadores.size();
+        ResultadoBusca r = new ResultadoBusca();
+        r.nanos = new long[nAlg];
+        r.comparacoes = new long[nAlg];
+        r.ocorrenciasAlg = new long[nAlg];
+
+        try (DataInputStream dis = new DataInputStream(
+                new BufferedInputStream(new FileInputStream(nomeArq)))) {
+
+            dis.readInt(); // pula o cabecalho (ultimo id)
+
+            Filme f;
+            while ((f = proximoValido(dis)) != null) {
+                r.registrosVarridos++;
+                String texto = normalizar(textoDoCampo(f, campo));
+
+                List<Integer> primeiro = null;
+                for (int a = 0; a < nAlg; a++) {
+                    long ini = System.nanoTime();
+                    List<Integer> pos = buscadores.get(a).buscarTodos(texto);
+                    r.nanos[a] += System.nanoTime() - ini;
+                    r.ocorrenciasAlg[a] += pos.size();
+                    if (a == 0) primeiro = pos;
+                }
+
+                if (!primeiro.isEmpty()) {
+                    r.totalOcorrencias += primeiro.size();
+                    int p = primeiro.get(0);
+                    // trecho de ate 30 caracteres antes e depois da primeira ocorrencia
+                    int ini = Math.max(0, p - 30);
+                    int fim = Math.min(texto.length(), p + 30);
+                    String trecho = (ini > 0 ? "..." : "") + texto.substring(ini, fim).replace('\n', ' ')
+                            + (fim < texto.length() ? "..." : "");
+                    r.acertos.add(new Acerto(f, primeiro.size(), trecho));
+                }
+            }
+        }
+
+        for (int a = 0; a < nAlg; a++) {
+            r.comparacoes[a] = buscadores.get(a).getComparacoes();
+        }
+        return r;
     }
 }
